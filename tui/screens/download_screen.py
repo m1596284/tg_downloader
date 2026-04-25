@@ -13,12 +13,24 @@ from models.schemas import ChannelInfo, DownloadJob, FilterOptions
 DOWNLOADS_DIR = Path("downloads")
 DB_PATH = Path("tg_downloader.db")
 
+# UI 進度更新節流（秒）
+_PROGRESS_THROTTLE = 0.5
+
 
 def _fmt_size(size_bytes: int | None) -> str:
     if size_bytes is None:
         return "—"
     mb = size_bytes / 1024 / 1024
     return f"{mb:.1f} MB"
+
+
+def _fmt_eta(seconds: float) -> str:
+    s = int(seconds)
+    if s < 60:
+        return f"00:{s:02d}"
+    if s < 3600:
+        return f"{s // 60:02d}:{s % 60:02d}"
+    return f"{s // 3600}h{(s % 3600) // 60:02d}m"
 
 
 class DownloadScreen(Screen):
@@ -39,6 +51,9 @@ class DownloadScreen(Screen):
         self._jobs: list[DownloadJob] = []
         self._done_count = 0
         self._total_bytes = 0
+        # 每個 job 的開始時間與上次 UI 更新時間（key = job.id）
+        self._job_start: dict[int | None, float] = {}
+        self._last_ui_update: dict[int | None, float] = {}
 
     # ------------------------------------------------------------------
     # Compose
@@ -115,13 +130,40 @@ class DownloadScreen(Screen):
 
         # — 下載階段 —
         def on_file_start(job: DownloadJob) -> None:
-            self._update_row(job, "downloading")
+            self._job_start[job.id] = time.monotonic()
+            self._last_ui_update[job.id] = 0.0
+            self._update_row(job, "等待中...")
+
+        def on_progress_cb(idx: int, received: int, total: int) -> None:
+            if idx >= len(self._jobs):
+                return
+            job = self._jobs[idx]
+            now = time.monotonic()
+            # 節流：每 0.5 秒更新一次 UI
+            if now - self._last_ui_update.get(job.id, 0) < _PROGRESS_THROTTLE:
+                return
+            self._last_ui_update[job.id] = now
+
+            elapsed = now - self._job_start.get(job.id, now)
+            speed = received / elapsed if elapsed > 0 else 0  # bytes/sec
+            pct = received / total * 100 if total > 0 else 0
+            eta = (total - received) / speed if speed > 0 else 0
+
+            recv_mb = received / 1024 / 1024
+            total_mb = total / 1024 / 1024
+            speed_mb = speed / 1024 / 1024
+            self._update_row(
+                job,
+                f"{pct:.0f}% {recv_mb:.1f}/{total_mb:.1f}MB "
+                f"{speed_mb:.1f}MB/s ETA {_fmt_eta(eta)}",
+            )
 
         def on_file_done(job: DownloadJob) -> None:
             self._done_count += 1
             if job.file_size:
                 self._total_bytes += job.file_size
-            self._update_row(job, job.status)
+            status = "✓ 完成" if job.status == "done" else "✗ 錯誤"
+            self._update_row(job, status)
             self._update_stats()
 
         await download_all(
@@ -132,6 +174,7 @@ class DownloadScreen(Screen):
             entity=entity,
             on_file_start=on_file_start,
             on_file_done=on_file_done,
+            on_progress=on_progress_cb,
         )
 
         self._finish()

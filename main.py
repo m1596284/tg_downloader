@@ -263,13 +263,6 @@ async def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    if args.tui:
-        # TUI 模式：不需要先建立 CLI client
-        from tui.app import run_tui
-
-        run_tui()
-        return
-
     if args.list:
         await cmd_list()
         return
@@ -290,7 +283,14 @@ async def main() -> None:
 
 
 def main_sync() -> None:
-    asyncio.run(main())
+    parser = build_parser()
+    args = parser.parse_args()
+    if args.tui:
+        from tui.app import run_tui
+
+        run_tui()
+    else:
+        asyncio.run(main())
 
 
 if __name__ == "__main__":

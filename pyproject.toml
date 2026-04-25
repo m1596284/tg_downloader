@@ -4,13 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tg-downloader"
-version = "0.1.0"
-description = "Telegram Media Downloader - Phase 1 MVP"
+version = "0.2.0"
+description = "Telegram Media Downloader - Phase 2"
 requires-python = ">=3.11"
 dependencies = [
     "telethon>=1.36",
     "python-dotenv>=1.0",
     "rich>=13.0",
+    "aiosqlite>=0.19",
+    "textual>=0.60",
+    "pydantic>=2.0",
 ]
 
 [project.scripts]
@@ -18,3 +21,6 @@ tg-downloader = "main:main_sync"
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
+
+[tool.hatch.build.targets.wheel.sources]
+"" = "."

@@ -10,6 +10,7 @@ from telethon import TelegramClient
 from telethon.errors import FloodWaitError
 from telethon.tl.types import (
     Document,
+    DocumentAttributeVideo,
     Message,
     MessageMediaDocument,
     MessageMediaPhoto,

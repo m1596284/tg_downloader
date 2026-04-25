@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -79,27 +80,64 @@ def _matches_keyword(msg: Message, keywords: list[str]) -> bool:
     return any(kw.lower() in text for kw in keywords)
 
 
-def _get_filename(msg: Message) -> str:
-    """從訊息產生下載檔名。"""
-    msg_id = msg.id
-    date_str = msg.date.strftime("%Y%m%d_%H%M%S") if msg.date else "unknown"
+_UNSAFE_CHARS = str.maketrans({c: "_" for c in r'/\:*?"<>|' + "\n\r\t"})
 
+
+def _caption_slug(text: str, max_chars: int = 20) -> str:
+    """將訊息文字轉成合法檔名片段（最多 max_chars 字）。"""
+    cleaned = text.strip().translate(_UNSAFE_CHARS)
+    cleaned = re.sub(r"[\s_]+", "_", cleaned).strip("_")
+    return cleaned[:max_chars] if cleaned else ""
+
+
+def _get_ext(msg: Message) -> str:
+    """取得副檔名（含點），無法判斷時回傳空字串。"""
+    if isinstance(msg.media, MessageMediaDocument) and isinstance(
+        msg.document, Document
+    ):
+        # 優先從原始檔名取副檔名
+        for attr in msg.document.attributes:
+            fname = getattr(attr, "file_name", None)
+            if fname and "." in fname:
+                return "." + fname.rsplit(".", 1)[-1]
+        mime = getattr(msg.document, "mime_type", "") or ""
+        if mime.startswith("video/"):
+            return "." + (mime.split("/")[-1] if "/" in mime else "mp4")
+        if mime.startswith("image/"):
+            return "." + (mime.split("/")[-1] if "/" in mime else "jpg")
+    return ".jpg"  # photo 預設
+
+
+def _get_filename(msg: Message) -> str:
+    """從訊息產生下載檔名。
+
+    優先順序：
+    1. 訊息文字（caption）前 20 字
+    2. 原始檔名（Telegram 上傳時設定的）
+    3. 日期時間
+    """
+    msg_id = msg.id
+    ext = _get_ext(msg)
+
+    # 1. 訊息文字
+    caption = (msg.message or "").strip()
+    if caption:
+        slug = _caption_slug(caption)
+        if slug:
+            return f"{msg_id}_{slug}{ext}"
+
+    # 2. 原始檔名
     if isinstance(msg.media, MessageMediaDocument) and isinstance(
         msg.document, Document
     ):
         for attr in msg.document.attributes:
-            filename = getattr(attr, "file_name", None)
-            if filename:
-                return f"{msg_id}_{filename}"
-        mime = getattr(msg.document, "mime_type", "") or ""
-        if mime.startswith("video/"):
-            ext = mime.split("/")[-1] if "/" in mime else "mp4"
-            return f"{msg_id}_{date_str}.{ext}"
-        if mime.startswith("image/"):
-            ext = mime.split("/")[-1] if "/" in mime else "jpg"
-            return f"{msg_id}_{date_str}.{ext}"
+            fname = getattr(attr, "file_name", None)
+            if fname:
+                return f"{msg_id}_{fname}"
 
-    return f"{msg_id}_{date_str}.jpg"
+    # 3. 日期時間
+    date_str = msg.date.strftime("%Y%m%d_%H%M%S") if msg.date else "unknown"
+    return f"{msg_id}_{date_str}{ext}"
 
 
 # ---------------------------------------------------------------------------

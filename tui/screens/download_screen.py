@@ -101,7 +101,7 @@ class DownloadScreen(Screen):
             self._finish()
             return
 
-        # 初始化表格列
+        # 初始化表格列（全部先顯示 pending）
         table = self.query_one("#job-table", DataTable)
         for job in self._jobs:
             table.add_row(
@@ -129,6 +129,7 @@ class DownloadScreen(Screen):
             self._jobs,
             dest_dir,
             DB_PATH,
+            entity=entity,
             on_file_start=on_file_start,
             on_file_done=on_file_done,
         )

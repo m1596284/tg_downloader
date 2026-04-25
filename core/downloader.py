@@ -20,8 +20,6 @@ from telethon.tl.types import (
 from core.db import init_db, is_downloaded, update_job_status, upsert_job
 from models.schemas import DownloadJob, FilterOptions
 
-DOWNLOAD_SEMAPHORE = asyncio.Semaphore(3)
-
 VIDEO_MIME_PREFIXES = ("video/",)
 IMAGE_MIME_PREFIXES = ("image/",)
 
@@ -239,56 +237,59 @@ async def download_job(
     job: DownloadJob,
     dest_dir: Path,
     db_path: Path,
+    entity=None,
     on_progress: Callable[[int, int], None] | None = None,
 ) -> None:
-    """下載單一 job，更新 DB 狀態。"""
-    async with DOWNLOAD_SEMAPHORE:
-        dest_path = dest_dir / job.file_name
+    """下載單一 job，更新 DB 狀態。entity 可由外部傳入避免重複查詢。"""
+    dest_path = dest_dir / job.file_name
 
-        if dest_path.exists() and job.status == "done":
-            return
-
-        # 設為 downloading
+    if dest_path.exists():
         if job.id is not None:
-            await update_job_status(job.id, "downloading", db_path=db_path)
-
-        def _progress_callback(received: int, total: int) -> None:
-            if on_progress:
-                on_progress(received, total)
-
-        try:
-            entity = await client.get_entity(job.channel_id)
-            msg = await client.get_messages(entity, ids=job.message_id)
-            await client.download_media(
-                msg,
-                file=str(dest_path),
-                progress_callback=_progress_callback,
+            await update_job_status(
+                job.id, "done", local_path=str(dest_path), db_path=db_path
             )
-            if job.id is not None:
-                await update_job_status(
-                    job.id, "done", local_path=str(dest_path), db_path=db_path
-                )
-        except FloodWaitError as e:
-            wait_sec = e.seconds + 1
-            await asyncio.sleep(wait_sec)
-            if dest_path.exists():
-                dest_path.unlink()
-            if job.id is not None:
-                await update_job_status(
-                    job.id,
-                    "error",
-                    error_msg=f"FloodWait {e.seconds}s",
-                    db_path=db_path,
-                )
-            raise
-        except Exception as exc:
-            if dest_path.exists():
-                dest_path.unlink()
-            if job.id is not None:
-                await update_job_status(
-                    job.id, "error", error_msg=str(exc), db_path=db_path
-                )
-            raise
+        return
+
+    if job.id is not None:
+        await update_job_status(job.id, "downloading", db_path=db_path)
+
+    def _progress_callback(received: int, total: int) -> None:
+        if on_progress:
+            on_progress(received, total)
+
+    try:
+        peer = entity if entity is not None else job.channel_id
+        msg = await client.get_messages(peer, ids=job.message_id)
+        await client.download_media(
+            msg,
+            file=str(dest_path),
+            progress_callback=_progress_callback,
+        )
+        if job.id is not None:
+            await update_job_status(
+                job.id, "done", local_path=str(dest_path), db_path=db_path
+            )
+    except FloodWaitError as e:
+        wait_sec = e.seconds + 1
+        await asyncio.sleep(wait_sec)
+        if dest_path.exists():
+            dest_path.unlink()
+        if job.id is not None:
+            await update_job_status(
+                job.id,
+                "error",
+                error_msg=f"FloodWait {e.seconds}s",
+                db_path=db_path,
+            )
+        raise
+    except Exception as exc:
+        if dest_path.exists():
+            dest_path.unlink()
+        if job.id is not None:
+            await update_job_status(
+                job.id, "error", error_msg=str(exc), db_path=db_path
+            )
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -301,29 +302,30 @@ async def download_all(
     jobs: list[DownloadJob],
     dest_dir: Path,
     db_path: Path,
+    entity=None,
     on_file_start: Callable[[DownloadJob], None] | None = None,
     on_file_done: Callable[[DownloadJob], None] | None = None,
     on_progress: Callable[[int, int, int], None] | None = None,
 ) -> None:
-    """並行下載所有 jobs（最多 3 條同時）。"""
+    """循序下載所有 jobs，每個完成後才進行下一個。"""
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    async def _run(idx: int, job: DownloadJob) -> None:
+    for idx, job in enumerate(jobs):
         if on_file_start:
             on_file_start(job)
 
-        def _prog(received: int, total: int) -> None:
+        def _prog(received: int, total: int, _idx: int = idx) -> None:
             if on_progress:
-                on_progress(idx, received, total)
+                on_progress(_idx, received, total)
 
         final_status = "error"
         try:
-            await download_job(client, job, dest_dir, db_path, on_progress=_prog)
+            await download_job(
+                client, job, dest_dir, db_path, entity=entity, on_progress=_prog
+            )
             final_status = "done"
         except Exception:
             pass  # 錯誤已記錄到 DB，繼續下一個
 
         if on_file_done:
             on_file_done(job.model_copy(update={"status": final_status}))
-
-    await asyncio.gather(*[_run(i, job) for i, job in enumerate(jobs)])

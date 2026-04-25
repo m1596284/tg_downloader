@@ -17,6 +17,9 @@ class FilterOptions(BaseModel):
     min_size_mb: float | None = None
     max_size_mb: float | None = None
     limit: int = 50
+    min_duration_sec: float | None = None  # 最短時長（秒），只對 video 有效
+    max_duration_sec: float | None = None  # 最長時長（秒），只對 video 有效
+    keywords: list[str] = []  # 關鍵字清單（OR 邏輯，大小寫不敏感）
 
 
 class ChannelInfo(BaseModel):
@@ -40,3 +43,4 @@ class DownloadJob(BaseModel):
     status: Literal["pending", "downloading", "done", "error"] = "pending"
     local_path: str | None = None
     error_msg: str | None = None
+    duration_sec: float | None = None  # 影片時長（秒），photo 或未知為 None

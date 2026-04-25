@@ -42,6 +42,12 @@ class FilterScreen(Screen):
         yield Input(placeholder="10", id="min-size")
         yield Label("最大大小 MB（可留空）")
         yield Input(placeholder="500", id="max-size")
+        yield Label("最短時長（秒，可留空，只對影片有效）")
+        yield Input(placeholder="60", id="min-duration")
+        yield Label("最長時長（秒，可留空，只對影片有效）")
+        yield Input(placeholder="3600", id="max-duration")
+        yield Label("關鍵字（可留空，多個用逗號分隔，OR 邏輯，大小寫不敏感）")
+        yield Input(placeholder="教學,tutorial", id="keyword")
         yield Button("開始下載", variant="primary", id="start")
         yield Footer()
 
@@ -85,6 +91,24 @@ class FilterScreen(Screen):
             self.notify("大小必須是數字（MB）", severity="error")
             return
 
+        # 解析時長
+        min_dur_str = self.query_one("#min-duration", Input).value.strip()
+        max_dur_str = self.query_one("#max-duration", Input).value.strip()
+        try:
+            min_duration = float(min_dur_str) if min_dur_str else None
+            max_duration = float(max_dur_str) if max_dur_str else None
+        except ValueError:
+            self.notify("時長必須是數字（秒）", severity="error")
+            return
+
+        # 解析關鍵字
+        keyword_str = self.query_one("#keyword", Input).value.strip()
+        keywords = (
+            [kw.strip() for kw in keyword_str.split(",") if kw.strip()]
+            if keyword_str
+            else []
+        )
+
         # 取得媒體類型
         media_type_select = self.query_one("#media-type", Select)
         media_type = str(media_type_select.value) if media_type_select.value else "all"
@@ -96,5 +120,8 @@ class FilterScreen(Screen):
             min_size_mb=min_size,
             max_size_mb=max_size,
             limit=limit,
+            min_duration_sec=min_duration,
+            max_duration_sec=max_duration,
+            keywords=keywords,
         )
         self.dismiss(filters)

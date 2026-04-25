@@ -14,7 +14,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
-from core.client import fetch_channels, get_client, load_config
+from core.client import fetch_channels, get_client
 from core.db import DB_PATH, init_db
 from core.downloader import download_all, scan_messages
 from models.schemas import FilterOptions
@@ -69,7 +69,9 @@ async def cmd_download(
             or getattr(entity, "username", None)
             or str(channel)
         )
-        safe_name = "".join(c if c.isalnum() or c in "-_." else "_" for c in channel_name)
+        safe_name = "".join(
+            c if c.isalnum() or c in "-_." else "_" for c in channel_name
+        )
         dest_dir = DOWNLOADS_DIR / safe_name
 
         await init_db(DB_PATH)
@@ -87,13 +89,17 @@ async def cmd_download(
             if count % 10 == 0:
                 console.print(f"[dim]已掃描 {count} 則...[/dim]")
 
-        jobs = await scan_messages(client, entity, filters, DB_PATH, on_progress=on_scan)
+        jobs = await scan_messages(
+            client, entity, filters, DB_PATH, on_progress=on_scan
+        )
 
         if not jobs:
             console.print("[yellow]沒有找到符合條件的媒體訊息。[/yellow]")
             return
 
-        console.print(f"[green]找到 {len(jobs)} 個待下載檔案，開始並行下載（最多 3 條）...[/green]")
+        console.print(
+            f"[green]找到 {len(jobs)} 個待下載檔案，開始並行下載（最多 3 條）...[/green]"
+        )
 
         from rich.progress import (
             BarColumn,
@@ -228,6 +234,23 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="MB",
         help="最大檔案大小（MB）",
     )
+    parser.add_argument(
+        "--min-duration",
+        type=float,
+        metavar="SECONDS",
+        help="影片最短時長（秒），只對 video 有效",
+    )
+    parser.add_argument(
+        "--max-duration",
+        type=float,
+        metavar="SECONDS",
+        help="影片最長時長（秒），只對 video 有效",
+    )
+    parser.add_argument(
+        "--keyword",
+        metavar="KEYWORD[,KEYWORD...]",
+        help="關鍵字篩選，多個用逗號分隔（大小寫不敏感，OR 邏輯）",
+    )
     return parser
 
 
@@ -259,6 +282,9 @@ async def main() -> None:
             min_size_mb=args.min_size,
             max_size_mb=args.max_size,
             limit=args.limit,
+            min_duration_sec=args.min_duration,
+            max_duration_sec=args.max_duration,
+            keywords=args.keyword.split(",") if args.keyword else [],
         )
         await cmd_download(args.channel, filters)
 

@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS download_jobs (
     status       TEXT NOT NULL DEFAULT 'pending',
     local_path   TEXT,
     error_msg    TEXT,
+    duration_sec REAL,
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
     UNIQUE(channel_id, message_id)
@@ -35,10 +36,16 @@ def _now_iso() -> str:
 
 
 async def init_db(db_path: Path = DB_PATH) -> None:
-    """建立 schema（若不存在）。"""
+    """建立 schema（若不存在），並自動遷移舊版 DB。"""
     async with aiosqlite.connect(db_path) as db:
         await db.execute(_CREATE_TABLE_SQL)
         await db.commit()
+        # 遷移：為舊版 DB 補上 duration_sec 欄位
+        try:
+            await db.execute("ALTER TABLE download_jobs ADD COLUMN duration_sec REAL")
+            await db.commit()
+        except Exception:
+            pass  # 欄位已存在，忽略
 
 
 async def upsert_job(job: DownloadJob, db_path: Path = DB_PATH) -> int:
@@ -49,8 +56,9 @@ async def upsert_job(job: DownloadJob, db_path: Path = DB_PATH) -> int:
             """
             INSERT OR IGNORE INTO download_jobs
                 (channel_id, message_id, file_name, file_size, media_type,
-                 msg_date, status, local_path, error_msg, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 msg_date, status, local_path, error_msg, duration_sec,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job.channel_id,
@@ -62,6 +70,7 @@ async def upsert_job(job: DownloadJob, db_path: Path = DB_PATH) -> int:
                 job.status,
                 job.local_path,
                 job.error_msg,
+                job.duration_sec,
                 now,
                 now,
             ),
@@ -100,7 +109,9 @@ async def update_job_status(
         await db.commit()
 
 
-async def get_pending_jobs(channel_id: int, db_path: Path = DB_PATH) -> list[DownloadJob]:
+async def get_pending_jobs(
+    channel_id: int, db_path: Path = DB_PATH
+) -> list[DownloadJob]:
     """取得指定 channel 尚未完成（pending / error）的任務。"""
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
@@ -117,7 +128,9 @@ async def get_pending_jobs(channel_id: int, db_path: Path = DB_PATH) -> list[Dow
     return [_row_to_job(r) for r in rows]
 
 
-async def is_downloaded(channel_id: int, message_id: int, db_path: Path = DB_PATH) -> bool:
+async def is_downloaded(
+    channel_id: int, message_id: int, db_path: Path = DB_PATH
+) -> bool:
     """判斷指定訊息是否已成功下載（status=done）。"""
     async with aiosqlite.connect(db_path) as db:
         row = await (
@@ -142,4 +155,5 @@ def _row_to_job(row: aiosqlite.Row) -> DownloadJob:
         status=row["status"],
         local_path=row["local_path"],
         error_msg=row["error_msg"],
+        duration_sec=row["duration_sec"],
     )

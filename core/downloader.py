@@ -64,6 +64,22 @@ def _get_file_size(msg: Message) -> int | None:
     return None
 
 
+def _get_video_duration(doc: Document) -> float | None:
+    """取得影片時長（秒），無時長資訊回傳 None。"""
+    for attr in doc.attributes:
+        if isinstance(attr, DocumentAttributeVideo):
+            return float(attr.duration)
+    return None
+
+
+def _matches_keyword(msg: Message, keywords: list[str]) -> bool:
+    """訊息 caption 是否包含任一關鍵字（大小寫不敏感，OR 邏輯）。"""
+    if not keywords:
+        return True
+    text = (msg.message or "").lower()
+    return any(kw.lower() in text for kw in keywords)
+
+
 def _get_filename(msg: Message) -> str:
     """從訊息產生下載檔名。"""
     msg_id = msg.id
@@ -109,6 +125,10 @@ def _passes_filters(
     if filters.until is not None and msg.date > filters.until:
         return False
 
+    # 關鍵字篩選（大小寫不敏感，OR 邏輯）
+    if not _matches_keyword(msg, filters.keywords):
+        return False
+
     # 大小篩選（只對有大小資訊的 document 有效）
     file_size = _get_file_size(msg)
     if file_size is not None:
@@ -122,6 +142,25 @@ def _passes_filters(
             and file_size > filters.max_size_mb * 1024 * 1024
         ):
             return False
+
+    # 時長篩選（只對 video 有效；gif 等無 DocumentAttributeVideo 者視為通過）
+    if (
+        media_type == "video"
+        and isinstance(msg.media, MessageMediaDocument)
+        and isinstance(msg.document, Document)
+    ):
+        duration = _get_video_duration(msg.document)
+        if duration is not None:
+            if (
+                filters.min_duration_sec is not None
+                and duration < filters.min_duration_sec
+            ):
+                return False
+            if (
+                filters.max_duration_sec is not None
+                and duration > filters.max_duration_sec
+            ):
+                return False
 
     return True
 
@@ -162,6 +201,15 @@ async def scan_messages(
         file_name = _get_filename(msg)
         file_size = _get_file_size(msg)
 
+        # 取得影片時長（只有 video document 才有）
+        duration_sec: float | None = None
+        if (
+            media_type == "video"
+            and isinstance(msg.media, MessageMediaDocument)
+            and isinstance(msg.document, Document)
+        ):
+            duration_sec = _get_video_duration(msg.document)
+
         job = DownloadJob(
             channel_id=channel_id,
             message_id=msg.id,
@@ -170,6 +218,7 @@ async def scan_messages(
             media_type=media_type,  # type: ignore[arg-type]
             msg_date=msg.date,
             status="pending",
+            duration_sec=duration_sec,
         )
         job_id = await upsert_job(job, db_path)
         jobs.append(job.model_copy(update={"id": job_id}))

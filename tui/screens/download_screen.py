@@ -37,7 +37,10 @@ def _fmt_eta(seconds: float) -> str:
 class DownloadScreen(Screen):
     """掃描 + 下載進度畫面。"""
 
-    BINDINGS = [("escape", "app.pop_screen", "返回")]
+    BINDINGS = [("escape", "dismiss_screen", "返回")]
+
+    def action_dismiss_screen(self) -> None:
+        self.dismiss(None)
 
     def __init__(
         self,
@@ -206,4 +209,4 @@ class DownloadScreen(Screen):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "back":
-            self.app.pop_screen()
+            self.dismiss(None)

@@ -111,10 +111,14 @@ class TgDownloaderApp(App):
 
         await self.push_screen(FilterScreen(channel), on_filters_set)
 
-    async def _show_download(self, channel: ChannelInfo, filters: FilterOptions) -> None:
+    async def _show_download(
+        self, channel: ChannelInfo, filters: FilterOptions
+    ) -> None:
         from tui.screens.download_screen import DownloadScreen
 
         await self.push_screen(DownloadScreen(channel, filters, self._client))
+        # DownloadScreen 關閉後，重新顯示 channel list
+        await self._show_channel_list()
 
     async def on_unmount(self) -> None:
         if self._client and self._client.is_connected():
